@@ -1,5 +1,9 @@
 import { Elysia, file } from "elysia";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+    SAMPLE_AUDIO,
+    MOCK
+} from "./mock"
 
 // await Bun.build({
 //   entrypoints: ["src/types.ts"],
@@ -24,8 +28,13 @@ const s3 = new S3Client({
 });
 
 const app = new Elysia()
-    .get("/", file('public/index.html'))
-    .get("/main.js", file("public/main.js"))
+    .get("/", () => file('public/index.html'))
+    .get("/main.js", () => file("public/main.js"))
+
+    .get("/lesson/:type", async ({ params: { type } }) => {
+         const lesson = MOCK[type] ?? MOCK.nature;
+         return lesson;
+    })
     // TESTING ONLY
     .get("/upload", async () => {
         const fileBuffer = await Bun.file("public/sample.mp3").arrayBuffer();
@@ -37,11 +46,13 @@ const app = new Elysia()
           ContentType: "audio/mpeg",
         }));
 
+        // Ok, let's keep it minimal. don't worry about styling/css. Just have the structure in place.  core html and js only. Now, ever
+
         // https://xfvfyrhfznslcbregmou.supabase.co/storage/v1/object/public/scrimba-interview/sample.mp3
 
         return { success: true, key: "sample.mp3" };     
     })
-    .listen(3000);
+    .listen(3001);
 
 console.log(
   `🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`
