@@ -22,7 +22,7 @@ const root = document.getElementById("app");
 const SVGNS = "http://www.w3.org/2000/svg";
 const STAGE_W = 700;
 const STAGE_H = 360;
-const DEFAULT_BG = "#0b1020";
+const DEFAULT_BG = "#1d1747";
 const BTN_PLAY = "\u25B6 Play";
 const BTN_PAUSE = "\u2759\u2759 Pause";
 const BTN_RESUME = "\u25B6 Resume";
@@ -107,15 +107,65 @@ route();
 // ----------------------------------------------------------------------------
 function renderQuery() {
   stopPlayback();
+  const examples = [
+    { label: "Why is the sky blue?", q: "nature" },
+    { label: "How does the Norwegian parliament work?", q: "politics" },
+    { label: "Hash map vs. B-tree", q: "datastructures" },
+  ];
   root.innerHTML = `
-    <input id="q" placeholder="nature" />
-    <button id="go">Explain</button>`;
-  root.querySelector("#go").onclick = () => {
-    const q = root.querySelector("#q").value.trim();
-    if (!q) return;
+    <h1 class="headline rv" style="animation-delay:.12s">
+      Ask. Watch. <span class="u">Understand.</span>
+    </h1>
+    <p class="sub rv" style="animation-delay:.2s">
+      AI-generated visual explanations with narration, rendered live in your browser.
+    </p>
+    <form class="bar rv" id="bar" style="animation-delay:.28s">
+      <input id="q" type="text" placeholder="Try: nature" autocomplete="off" autofocus />
+      <button id="go" type="submit">
+        <span class="sp"></span>
+        <span class="lbl">Explain</span>
+      </button>
+    </form>
+    <div class="status rv" id="status" style="animation-delay:.28s">
+      <span class="dots"><i></i><i></i><i></i></span>
+      <span id="statusText">rendering your lesson</span>
+    </div>
+    <div class="chips rv" style="animation-delay:.36s">
+      ${examples
+        .map(
+          (e) =>
+            `<button type="button" class="chip" data-q="${e.q}">${e.label}</button>`
+        )
+        .join("")}
+    </div>`;
+
+  const qInput = root.querySelector("#q");
+  const bar = root.querySelector("#bar");
+  const status = root.querySelector("#status");
+  const statusText = root.querySelector("#statusText");
+  const lbl = root.querySelector("#go .lbl");
+
+  const submit = (q) => {
+    q = (q ?? "").trim();
+    if (!q) { qInput.focus(); return; }
+    bar.classList.add("loading");
+    lbl.textContent = "Rendering";
+    statusText.textContent = "rendering your lesson";
+    status.classList.add("show");
     history.pushState({}, "", `/?q=${encodeURIComponent(q)}`);
     renderPlayer(q);
   };
+
+  bar.onsubmit = (e) => {
+    e.preventDefault();
+    submit(qInput.value);
+  };
+  root.querySelectorAll(".chip").forEach((chip) => {
+    chip.onclick = () => {
+      qInput.value = chip.textContent.trim();
+      submit(chip.dataset.q);
+    };
+  });
 }
 
 // ----------------------------------------------------------------------------
@@ -124,22 +174,17 @@ function renderQuery() {
 async function renderPlayer(q) {
   stopPlayback();
   root.innerHTML = `
-    <button id="back">&larr; back</button>
-    <div id="stageWrap" style="position:relative;width:${STAGE_W}px;height:${STAGE_H}px;
-         margin:0 auto;border-radius:14px;overflow:hidden;background:${DEFAULT_BG};
-         box-shadow:0 10px 40px rgba(0,0,0,.35)">
-      <div id="atmosphere" style="position:absolute;inset:0;pointer-events:none"></div>
-      <svg id="stage" viewBox="0 0 ${STAGE_W} ${STAGE_H}" width="${STAGE_W}" height="${STAGE_H}"
-           style="position:absolute;inset:0;display:block"></svg>
-      <div id="status" style="position:absolute;inset:0;display:flex;align-items:center;
-           justify-content:center;color:#9fb3c8;font-family:system-ui,sans-serif;font-size:15px">
-        Loading\u2026</div>
-    </div>
-    <div id="caption" style="max-width:${STAGE_W}px;margin:14px auto 0;min-height:1.5em;
-         text-align:center;font-family:system-ui,sans-serif;font-size:18px;line-height:1.4;
-         color:#e8eef6;transition:opacity .2s"></div>
-    <div style="text-align:center;margin-top:10px">
-      <button id="play" disabled>${BTN_PLAY}</button>
+    <div class="player rv" style="animation-delay:.05s">
+      <div class="player-top">
+        <button id="back" class="back" type="button">&larr; Back</button>
+      </div>
+      <div id="stageWrap" class="stage-wrap">
+        <div id="atmosphere" style="position:absolute;inset:0;pointer-events:none"></div>
+        <svg id="stage" viewBox="0 0 ${STAGE_W} ${STAGE_H}" preserveAspectRatio="xMidYMid meet"></svg>
+        <div id="status" class="stage-status">Loading\u2026</div>
+      </div>
+      <div id="caption" class="caption"></div>
+      <button id="play" class="play" type="button" disabled>${BTN_PLAY}</button>
     </div>`;
   root.querySelector("#back").onclick = () => {
     stopPlayback();
