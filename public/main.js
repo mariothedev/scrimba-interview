@@ -96,7 +96,7 @@ function stopPlayback() {
 // ----------------------------------------------------------------------------
 function route() {
   const q = new URLSearchParams(location.search).get("q");
-  if (q) renderPlayer(q);
+  if (q) renderPlayer(q, { autoplay: true });
   else renderQuery();
 }
 window.addEventListener("popstate", route);
@@ -152,7 +152,7 @@ function renderQuery() {
     statusText.textContent = "";
     status.classList.add("show");
     history.pushState({}, "", `/?q=${encodeURIComponent(q)}`);
-    renderPlayer(q);
+    renderPlayer(q, { autoplay: true });
   };
 
   bar.onsubmit = (e) => {
@@ -170,7 +170,7 @@ function renderQuery() {
 // ----------------------------------------------------------------------------
 //  View: player shell (loading / error / ready states)
 // ----------------------------------------------------------------------------
-async function renderPlayer(q) {
+async function renderPlayer(q, { autoplay = false } = {}) {
   stopPlayback();
   root.innerHTML = `
     <div class="player rv" style="animation-delay:.05s">
@@ -204,7 +204,7 @@ async function renderPlayer(q) {
     status.innerHTML = `<div style="text-align:center">
       Couldn't load this lesson.<br><br>
       <button id="retry">Try again</button></div>`;
-    status.querySelector("#retry").onclick = () => renderPlayer(q);
+    status.querySelector("#retry").onclick = () => renderPlayer(q, { autoplay: true });
     return;
   }
 
@@ -228,16 +228,22 @@ async function renderPlayer(q) {
   // transport: one button drives play -> pause <-> resume -> replay
   let player = null;
   ctx.playBtn.disabled = false;
+  const startPlayer = () => {
+    player = createPlayer(lesson, ctx);
+    player.start();
+  };
+
   ctx.playBtn.onclick = () => {
     if (!player || player.isDone()) {
-      player = createPlayer(lesson, ctx);
-      player.start();
+      startPlayer();
     } else if (player.isPaused()) {
       player.resume();
     } else {
       player.pause();
     }
   };
+
+  if (autoplay) startPlayer();
 }
 
 // ============================================================================
@@ -365,7 +371,16 @@ function createPlayer(lesson, ctx) {
     let audioDone = false;
     audioEl.addEventListener("ended", () => { audioDone = true; }, { once: true });
     audioEl.addEventListener("error", () => { audioDone = true; }, { once: true });
-    audioEl.play().catch(() => { audioDone = true; });
+    audioEl.play().catch((e) => {
+      if (e?.name === "NotAllowedError") {
+        paused = true;
+        if (clock) clock.pause();
+        pauseLive();
+        setBtn(BTN_PLAY);
+        return;
+      }
+      audioDone = true;
+    });
     warmAudio(steps[i + 1]?.beat?.audio?.url); // gapless: prefetch the next clip
 
     clock = createClock();
