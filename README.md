@@ -28,3 +28,5 @@ npm run dev
 ```
 
 Open [localhost:3001](http://localhost:3001/) in your browser.
+
+Live demo: [scrimba.mariothedev.com](https://scrimba.mariothedev.com/) in your browser.
