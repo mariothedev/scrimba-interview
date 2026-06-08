@@ -3,6 +3,8 @@ import type { Lesson } from "./validator";
 
 const ELEVEN_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "21m00Tcm4TlvDq8ikWAM";
 const ELEVEN_MODEL_ID = process.env.ELEVENLABS_MODEL_ID || "eleven_turbo_v2_5";
+const ELEVENLABS_CONCURRENCY = 6;
+const ELEVENLABS_MAX_RETRIES = 3;
 
 interface Narration {
     lessonId: string;
@@ -48,6 +50,43 @@ interface ElevenResponse {
     normalized_alignment?: ElevenAlignment | null;
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const retryDelayMs = (retryAfter: string | null, attempt: number): number => {
+    if (retryAfter) {
+        const seconds = Number(retryAfter);
+        if (Number.isFinite(seconds)) return seconds * 1000;
+        const dateMs = Date.parse(retryAfter);
+        if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
+    }
+    return Math.min(8000, 500 * 2 ** attempt) + Math.floor(Math.random() * 250);
+};
+
+const mapLimitSettled = async <T>(
+    items: T[],
+    limit: number,
+    worker: (item: T) => Promise<void>
+): Promise<PromiseSettledResult<void>[]> => {
+    const results = new Array<PromiseSettledResult<void>>(items.length);
+    let next = 0;
+
+    const run = async () => {
+        while (next < items.length) {
+            const i = next++;
+            try {
+                await worker(items[i]);
+                results[i] = { status: "fulfilled", value: undefined };
+            } catch (reason) {
+                results[i] = { status: "rejected", reason };
+            }
+        }
+    };
+
+    const concurrency = Math.min(Math.max(1, limit), items.length);
+    await Promise.all(Array.from({ length: concurrency }, run));
+    return results;
+};
+
 // Convert ElevenLabs' character-level alignment into the word-start map the
 // renderer uses for `at: { word: "..." }` anchoring.
 const buildWords = (alignment: ElevenAlignment | null): { words: { word: string; start: number }[]; duration: number } => {
@@ -75,31 +114,42 @@ const buildWords = (alignment: ElevenAlignment | null): { words: { word: string;
 };
 
 const generateTTSForNarration = async (text: string): Promise<{ audio: ArrayBuffer; meta: { duration: number; words: { word: string; start: number }[] } }> => {
-    const res = await fetch(
-        `https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE_ID}/with-timestamps`,
-        {
-            method: "POST",
-            headers: {
-                "xi-api-key": process.env.ELEVENLABS_API_KEY!,
-                "Content-Type": "application/json",
-                Accept: "application/json",
-            },
-            body: JSON.stringify({
-                text,
-                model_id: ELEVEN_MODEL_ID,
-                output_format: "mp3_44100_128",
-            }),
-        }
-    );
+    let lastError = "";
 
-    if (!res.ok) {
-        throw new Error(`ElevenLabs ${res.status}: ${await res.text()}`);
+    for (let attempt = 0; attempt <= ELEVENLABS_MAX_RETRIES; attempt++) {
+        const res = await fetch(
+            `https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE_ID}/with-timestamps`,
+            {
+                method: "POST",
+                headers: {
+                    "xi-api-key": process.env.ELEVENLABS_API_KEY!,
+                    "Content-Type": "application/json",
+                    Accept: "application/json",
+                },
+                body: JSON.stringify({
+                    text,
+                    model_id: ELEVEN_MODEL_ID,
+                    output_format: "mp3_44100_128",
+                }),
+            }
+        );
+
+        if (res.ok) {
+            const data = (await res.json()) as ElevenResponse;
+            const audio = Buffer.from(data.audio_base64, "base64");
+            const meta = buildWords(data.normalized_alignment ?? data.alignment);
+            return { audio: audio.buffer.slice(audio.byteOffset, audio.byteOffset + audio.byteLength), meta };
+        }
+
+        lastError = `ElevenLabs ${res.status}: ${await res.text()}`;
+        if (res.status !== 429 || attempt === ELEVENLABS_MAX_RETRIES) break;
+
+        const delayMs = retryDelayMs(res.headers.get("Retry-After"), attempt);
+        console.warn(`[tts] ElevenLabs 429, retrying in ${Math.round(delayMs)}ms`);
+        await sleep(delayMs);
     }
 
-    const data = (await res.json()) as ElevenResponse;
-    const audio = Buffer.from(data.audio_base64, "base64");
-    const meta = buildWords(data.normalized_alignment ?? data.alignment);
-    return { audio: audio.buffer.slice(audio.byteOffset, audio.byteOffset + audio.byteLength), meta };
+    throw new Error(lastError);
 };
 
 // Generates audio for every narration in `lesson`, uploads each MP3 to the
@@ -111,8 +161,10 @@ const generate_and_attach_audio = async (lesson: Lesson): Promise<Lesson> => {
     console.log(`[tts] ${narrations.length} narrations for lesson id=${lesson.id}`);
     const t0 = performance.now();
 
-    const results = await Promise.allSettled(
-        narrations.map(async (n) => {
+    const results = await mapLimitSettled(
+        narrations,
+        ELEVENLABS_CONCURRENCY,
+        async (n) => {
             const tn = performance.now();
             const { audio, meta } = await generateTTSForNarration(n.text);
             console.log(`[tts]   #${n.index} synth ok (${Math.round(meta.duration * 100) / 100}s, ${meta.words.length} words) in ${Math.round(performance.now() - tn)}ms`);
@@ -125,7 +177,7 @@ const generate_and_attach_audio = async (lesson: Lesson): Promise<Lesson> => {
                 duration: meta.duration,
                 words: meta.words,
             };
-        })
+        }
     );
 
     const failed = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
