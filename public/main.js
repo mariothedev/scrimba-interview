@@ -127,8 +127,7 @@ function renderQuery() {
       </button>
     </form>
     <div class="status rv" id="status" style="animation-delay:.28s">
-      <span class="dots"><i></i><i></i><i></i></span>
-      <span id="statusText">rendering your lesson</span>
+      <span id="statusText"></span>
     </div>
     <div class="chips rv" style="animation-delay:.36s">
       ${examples
@@ -150,7 +149,7 @@ function renderQuery() {
     if (!q) { qInput.focus(); return; }
     bar.classList.add("loading");
     lbl.textContent = "Rendering";
-    statusText.textContent = "rendering your lesson";
+    statusText.textContent = "";
     status.classList.add("show");
     history.pushState({}, "", `/?q=${encodeURIComponent(q)}`);
     renderPlayer(q);
