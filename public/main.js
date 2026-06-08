@@ -377,8 +377,12 @@ function createPlayer(lesson, ctx) {
       if (paused) { requestAnimationFrame(tick); return; } // frozen: hold, don't advance
       const elapsed = clock.now();
       if (tlDur > 0) {
-        tl.time(Math.min(elapsed, tlDur));
-        if (elapsed >= tlDur) tl.progress(1); // visuals settle on time
+        try {
+          tl.time(Math.min(elapsed, tlDur));
+          if (elapsed >= tlDur) tl.progress(1); // visuals settle on time
+        } catch (e) {
+          console.error("timeline tick failed (continuing):", e); // isolated: don't kill the lesson
+        }
       }
       if (elapsed >= beatDur && (audioDone || elapsed >= maxWait)) {
         try { audioEl.pause(); } catch {}
@@ -837,18 +841,24 @@ function addAnimation(tl, node, a, els, at) {
         break;
       }
       const total = guide.getTotalLength();
+      if (!Number.isFinite(total) || total <= 0) {
+        console.warn("motionPath: guide path has zero/invalid length:", a.path);
+        break;
+      }
       const proxy = { p: a.from ?? 0 };
       const isCircle = kind === "circle";
       const bx = +(node.dataset.baseX ?? 0), by = +(node.dataset.baseY ?? 0);
       tl.to(proxy, {
         p: a.to ?? 1, duration: dur, ease: a.ease ?? "none",
         onUpdate: () => {
-          const pt = guide.getPointAtLength(proxy.p * total);
+          const len = proxy.p * total;
+          if (!Number.isFinite(len)) return; // bad from/to from the LLM — skip frame
+          const pt = guide.getPointAtLength(len);
           if (isCircle) {
             node.setAttribute("cx", pt.x);
             node.setAttribute("cy", pt.y);
           } else if (a.autoRotate) {
-            const ah = guide.getPointAtLength(Math.min(proxy.p * total + 1, total));
+            const ah = guide.getPointAtLength(Math.min(len + 1, total));
             gsap.set(node, { x: pt.x - bx, y: pt.y - by,
               rotation: Math.atan2(ah.y - pt.y, ah.x - pt.x) * 180 / Math.PI,
               transformOrigin: "50% 50%" });
